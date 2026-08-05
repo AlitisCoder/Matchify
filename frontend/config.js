@@ -1,0 +1,3 @@
+window.MATCHIFY_CONFIG = {
+  CLIENT_ID: "14c02cf6fede4711b18706dddd1116e5",
+};

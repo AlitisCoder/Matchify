@@ -1,0 +1,22 @@
+# --- Secrets & lokale Config (NIE committen) ---
+.env
+.env.local
+
+# --- Node ---
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# --- Python (Backend v1) ---
+backend/venv/
+backend/.venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# --- OS & Editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

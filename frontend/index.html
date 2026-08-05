@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<!-- Content-Security-Policy: Defense-in-Depth. Begrenzt, wohin die Seite
+     verbinden/laden darf. Selbst falls XSS durchkäme, kann der Token nur an
+     Spotify (connect-src) gehen, nicht an fremde Server. -->
+<meta http-equiv="Content-Security-Policy" content="
+  default-src 'none';
+  script-src 'self' 'unsafe-inline';
+  style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+  font-src https://fonts.gstatic.com;
+  img-src 'self' data: https://*.scdn.co https://*.spotifycdn.com;
+  media-src https://*.scdn.co https://*.dzcdn.net;
+  connect-src https://api.spotify.com https://accounts.spotify.com http://127.0.0.1:8000;
+  base-uri 'none'; form-action 'none'; frame-ancestors 'none';
+" />
+<title>Crate — Playlist-Tinder</title>
+
+<!--
+  ============================================================================
+  CRATE · Playlist-Tinder  (v0 — sicherster Weg, nur Spotify)
+  ============================================================================
+  Was das hier macht:
+    1. Login via Spotify OAuth 2.0 mit PKCE  (KEIN Client-Secret im Frontend!)
+    2. Liest deine Top-Artists + Top-Tracks  (Wrapped-Ersatz)
+    3. Baut aus deren GENRES eine Discovery-Suche -> neue Künstler/Songs
+    4. Du wischst: rechts = in Playlist, links = skip
+    5. Rechts-Swipe pusht den Track in eine private Spotify-Playlist
+
+  Warum nur Spotify (und kein Last.fm/Deezer) in v0:
+    - Ein einziger Account, den du eh hast. Nichts zu registrieren.
+    - Kein CORS-Proxy, kein Backend, kein Secret -> minimale Angriffsfläche.
+    - Deezer "related artists" (bessere Ähnlichkeit) = optionales Upgrade, s. unten.
+
+  SETUP (siehe README.md):
+    1. https://developer.spotify.com/dashboard -> "Create app"
+    2. Redirect URI EXAKT eintragen (Spotify lehnt "localhost" ab -> nimm 127.0.0.1):
+         lokal:   http://127.0.0.1:5500/
+         gehostet: https://DEIN-NAME.github.io/matchify/
+    3. config.example.js -> zu config.js kopieren, CLIENT_ID eintragen.
+    4. Im Repo-Root: npm install && npm start  -> http://127.0.0.1:5500/
+       (Root-URL mit Slash aufrufen, NICHT /index.html — sonst passt die Redirect-URI nicht.)
+
+  Sicherheit v0:
+    - Access-Token lebt NUR im RAM (nicht in localStorage) -> geringere XSS-Folgen.
+    - Minimale Scopes: user-top-read, playlist-modify-private.
+    - Refresh-Token wird bewusst NICHT gespeichert; nach ~1h neu einloggen.
+  ============================================================================
+-->
+
+<!-- ==== CONFIG ===========================================================
+     Deine CLIENT_ID kommt aus config.js (NICHT im Repo, siehe .gitignore).
+     Zum Einrichten: config.example.js -> zu config.js kopieren, ID eintragen.
+     ==================================================================== -->
+<script src="config.js"></script>
+<script>
+  const CONFIG = Object.assign({
+    REDIRECT_URI:  window.location.origin + window.location.pathname,
+    SCOPES:        "user-read-private user-read-email user-top-read playlist-modify-private playlist-modify-public",
+    MARKET:        "DE",
+    CLIENT_ID:     "",
+    BACKEND_URL:   "http://127.0.0.1:8000",  // Deezer-Proxy + ML-Ranker
+  }, window.MATCHIFY_CONFIG || {});
+</script>
+<!-- ==================================================================== -->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --ink:      #17131F;   /* tiefes Pflaumen-Schwarz, Basis            */
+    --ink-2:    #221B2E;   /* angehobene Fläche (Karte, Panels)         */
+    --ink-3:    #2C2439;   /* Ränder / Hover                            */
+    --paper:    #F3EDE4;   /* warmes Off-White (Text)                   */
+    --muted:    #9B8FA8;   /* lavendel-graue Sekundärschrift            */
+    --amber:    #F2B33D;   /* Sodium-Amber = "IN" / primäre Aktion      */
+    --amber-dk: #C98F26;
+    --slate:    #5EC8D8;   /* kühles Cyan = "SKIP"                      */
+    --shadow:   0 24px 60px -18px rgba(0,0,0,.75);
+    --r:        22px;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ height:100%; margin:0; }
+  body{
+    background:
+      radial-gradient(1200px 600px at 80% -10%, rgba(242,179,61,.10), transparent 60%),
+      radial-gradient(900px 500px at 0% 110%, rgba(94,200,216,.08), transparent 55%),
+      var(--ink);
+    color:var(--paper);
+    font-family:"Inter",system-ui,sans-serif;
+    display:flex; flex-direction:column; align-items:center;
+    min-height:100dvh; padding:18px 16px calc(18px + env(safe-area-inset-bottom));
+  }
+  a{ color:var(--amber); }
+
+  header.app{
+    width:100%; max-width:460px; display:flex; align-items:baseline;
+    justify-content:space-between; margin:6px 2px 14px;
+  }
+  .brand{ font-family:"Bricolage Grotesque"; font-weight:800; font-size:26px; letter-spacing:-.02em; }
+  .brand small{ color:var(--muted); font-family:"Inter"; font-weight:500; font-size:12px; letter-spacing:.14em; text-transform:uppercase; margin-left:8px; }
+  .who{ font-size:12px; color:var(--muted); }
+
+  /* ---- Login-Screen ---- */
+  .login{ margin-top:12vh; text-align:center; max-width:420px; }
+  .login h1{ font-family:"Bricolage Grotesque"; font-weight:800; font-size:clamp(34px,9vw,52px); line-height:.98; letter-spacing:-.03em; margin:0 0 14px; }
+  .login h1 em{ font-style:normal; color:var(--amber); }
+  .login p{ color:var(--muted); font-size:15px; line-height:1.55; margin:0 0 26px; }
+
+  .btn{
+    font-family:"Inter"; font-weight:600; font-size:15px; cursor:pointer;
+    border:none; border-radius:999px; padding:14px 22px; color:var(--ink);
+    background:var(--amber); transition:transform .08s ease, filter .15s ease;
+  }
+  .btn:hover{ filter:brightness(1.05); }
+  .btn:active{ transform:translateY(1px) scale(.99); }
+  .btn.ghost{ background:transparent; color:var(--paper); border:1px solid var(--ink-3); }
+
+  /* ---- Deck ---- */
+  .stage{ width:100%; max-width:460px; flex:1; display:flex; flex-direction:column; }
+  .deck{ position:relative; width:100%; aspect-ratio:3/4; margin-top:4px; }
+
+  .card{
+    position:absolute; inset:0; border-radius:var(--r); overflow:hidden;
+    background:var(--ink-2); box-shadow:var(--shadow);
+    will-change:transform; touch-action:none; user-select:none;
+    display:flex; flex-direction:column; justify-content:flex-end;
+  }
+  .card .art{ position:absolute; inset:0; background-size:cover; background-position:center; }
+  .card .scrim{ position:absolute; inset:0; background:linear-gradient(180deg, rgba(23,19,31,0) 38%, rgba(23,19,31,.35) 60%, rgba(23,19,31,.95) 100%); }
+  .card .meta{ position:relative; padding:22px 20px 20px; }
+  .eyebrow{ font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--amber); font-weight:600; margin-bottom:8px; }
+  .title{ font-family:"Bricolage Grotesque"; font-weight:800; font-size:26px; line-height:1.05; letter-spacing:-.02em; margin:0 0 4px; }
+  .artist{ color:var(--paper); opacity:.86; font-size:15px; font-weight:500; }
+
+  /* Passport-Stamp beim Ziehen */
+  .stamp{
+    position:absolute; top:22px; font-family:"Bricolage Grotesque"; font-weight:800;
+    font-size:30px; letter-spacing:.04em; padding:6px 16px; border-radius:12px;
+    border:3px solid; opacity:0; transform:rotate(-14deg); pointer-events:none;
+  }
+  .stamp.in{ left:20px; color:var(--amber); border-color:var(--amber); }
+  .stamp.skip{ right:20px; color:var(--slate); border-color:var(--slate); transform:rotate(14deg); }
+
+  /* Mini-EQ wenn Preview läuft */
+  .eq{ position:absolute; top:20px; right:20px; display:none; gap:3px; align-items:flex-end; height:18px; }
+  .eq.on{ display:flex; }
+  .eq span{ width:3px; background:var(--amber); border-radius:2px; animation:bounce .9s ease-in-out infinite; }
+  .eq span:nth-child(2){ animation-delay:.15s } .eq span:nth-child(3){ animation-delay:.3s } .eq span:nth-child(4){ animation-delay:.45s }
+  @keyframes bounce{ 0%,100%{ height:5px } 50%{ height:18px } }
+
+  /* ---- Controls ---- */
+  .controls{ display:flex; gap:14px; justify-content:center; align-items:center; padding:22px 0 6px; }
+  .ctrl{
+    width:60px; height:60px; border-radius:50%; border:1px solid var(--ink-3);
+    background:var(--ink-2); color:var(--paper); font-size:22px; cursor:pointer;
+    display:grid; place-items:center; transition:transform .08s ease, border-color .15s;
+  }
+  .ctrl:hover{ border-color:var(--muted); }
+  .ctrl:active{ transform:scale(.92); }
+  .ctrl.skip{ color:var(--slate); }
+  .ctrl.add{ width:72px; height:72px; background:var(--amber); color:var(--ink); border:none; font-size:26px; }
+  .ctrl.play{ font-size:18px; }
+  .ctrl[disabled]{ opacity:.35; cursor:not-allowed; }
+
+  .hint{ text-align:center; color:var(--muted); font-size:12px; margin-top:2px; }
+  kbd{ background:var(--ink-3); border-radius:5px; padding:1px 6px; font-family:inherit; font-size:11px; }
+
+  /* ---- Zustände ---- */
+  .state{ text-align:center; color:var(--muted); margin-top:16vh; max-width:380px; line-height:1.5; }
+  .state .big{ font-family:"Bricolage Grotesque"; font-weight:800; color:var(--paper); font-size:24px; margin-bottom:8px; }
+  .spinner{ width:34px; height:34px; border-radius:50%; border:3px solid var(--ink-3); border-top-color:var(--amber); animation:spin .8s linear infinite; margin:0 auto 16px; }
+  @keyframes spin{ to{ transform:rotate(360deg) } }
+
+  /* ---- Toast ---- */
+  #toast{ position:fixed; left:50%; bottom:22px; transform:translateX(-50%) translateY(20px);
+    background:var(--ink-2); border:1px solid var(--ink-3); color:var(--paper);
+    padding:12px 18px; border-radius:999px; font-size:14px; opacity:0; pointer-events:none;
+    transition:opacity .2s, transform .2s; box-shadow:var(--shadow); z-index:50; }
+  #toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  @media (prefers-reduced-motion: reduce){ *{ animation:none !important; transition:none !important; } }
+</style>
+</head>
+
+<body>
+  <div id="app"></div>
+  <div id="toast"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

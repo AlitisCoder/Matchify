@@ -1,0 +1,25 @@
+{
+  "name": "matchify",
+  "version": "0.1.0",
+  "description": "Playlist-Tinder für Spotify — wische durch neue Künstler aus deinen meistgehörten Genres und bau dir per Rechts-Swipe eine Playlist.",
+  "private": true,
+  "scripts": {
+    "start": "serve frontend -l 5500",
+    "dev": "serve frontend -l 5500",
+    "backend": "cd backend && venv/bin/uvicorn app:app --reload --port 8000",
+    "backend:setup": "cd backend && python3 -m venv venv && venv/bin/pip install -r requirements.txt"
+  },
+  "keywords": [
+    "spotify",
+    "spotify-api",
+    "music-discovery",
+    "pkce",
+    "oauth2",
+    "vanilla-js"
+  ],
+  "author": "AlitisCoder",
+  "license": "MIT",
+  "devDependencies": {
+    "serve": "^14.2.1"
+  }
+}
