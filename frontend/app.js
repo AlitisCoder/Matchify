@@ -344,44 +344,13 @@ async function reRankDeck() {
 }
 
 /* --------------------------------------------------------------------------
-   7) Playlist-Push
+   7) Liked Songs
    -------------------------------------------------------------------------- */
-let PLAYLIST_ID = sessionStorage.getItem("pt_playlist_id") || null;
 
-/** Legt einmalig eine private Playlist an oder gibt die gespeicherte ID zurück. */
-async function ensurePlaylist(userId) {
-  if (PLAYLIST_ID) return PLAYLIST_ID;
-  const pl = await api(`/users/${userId}/playlists`, {
-    method: "POST",
-    body:   JSON.stringify({
-      name:        "Crate · Playlist-Tinder Funde",
-      description: "Rechts gewischt in Crate.",
-      public:      false,
-    }),
-  });
-  PLAYLIST_ID = pl.id;
-  sessionStorage.setItem("pt_playlist_id", PLAYLIST_ID);
-  return PLAYLIST_ID;
-}
-
-/** Track-URI zur Crate-Playlist hinzufügen.
- *  Bei 404 (Playlist gelöscht) wird einmalig eine neue angelegt und nochmal versucht. */
+/** Track zu den Liked Songs hinzufügen (PUT /me/tracks). */
 async function addToPlaylist(uri) {
-  const tryAdd = async () => {
-    const pid = await ensurePlaylist(STATE.userId);
-    await api(`/playlists/${pid}/tracks`, { method: "POST", body: JSON.stringify({ uris: [uri] }) });
-  };
-  try {
-    await tryAdd();
-  } catch (e) {
-    if (e.message.includes("404")) {
-      PLAYLIST_ID = null;
-      sessionStorage.removeItem("pt_playlist_id");
-      await tryAdd();
-    } else {
-      throw e;
-    }
-  }
+  const id = uri.split(":").pop();
+  await api("/me/tracks", { method: "PUT", body: JSON.stringify({ ids: [id] }) });
 }
 
 /* --------------------------------------------------------------------------
@@ -668,10 +637,10 @@ function handleErr(e, fatal = false) {
   } else if (e.message === "RATE_LIMIT") {
     if (fatal) renderError("Rate-Limit", "Spotify bremst gerade — kurz warten und neu laden.");
     else toast("Spotify bremst kurz — einen Moment warten…");
-  } else if (e.message.includes("403") && (e.message.includes("/playlists") || e.message.includes("/users/"))) {
+  } else if (e.message.includes("403") && e.message.includes("/me/tracks")) {
     renderError(
-      "Playlist-Berechtigung fehlt",
-      "Dein Spotify-Token hat keine Playlist-Rechte.<br>Bitte einmal neu autorisieren." +
+      "Berechtigung fehlt",
+      "Dein Spotify-Token hat keine Rechte zum Speichern von Songs.<br>Bitte einmal neu autorisieren." +
       `<br><br><small style="word-break:break-all;opacity:.6">${e.message}</small>`
     );
     const btn = document.createElement("button");
