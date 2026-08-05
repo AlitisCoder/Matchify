@@ -707,18 +707,19 @@ function handleErr(e, fatal = false) {
    Preview-Enrichment — Deezer-Proxy (Spotify liefert preview_url nicht mehr)
    -------------------------------------------------------------------------- */
 
-/** Preview-URL direkt von der Deezer-API holen (kein Backend nötig). */
+/** Preview-URL über iTunes Search API holen (CORS-fähig, kein Key nötig). */
 async function fetchDeezerPreview(track) {
   try {
     const mainArtist = track.artist.split(",")[0].trim();
-    const q = `track:"${track.name}" artist:"${mainArtist}"`;
+    const q = `${track.name} ${mainArtist}`;
     const res = await fetch(
-      `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=1`,
+      `https://itunes.apple.com/search?term=${encodeURIComponent(q)}&entity=song&limit=3&country=DE`,
       { signal: AbortSignal.timeout(6000) }
     );
     if (!res.ok) return null;
     const data = await res.json();
-    return data.data?.[0]?.preview || null;
+    const hit = data.results?.find(r => r.previewUrl) || null;
+    return hit?.previewUrl || null;
   } catch { return null; }
 }
 
