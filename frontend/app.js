@@ -142,7 +142,8 @@ async function tryRelatedArtists(artistName) {
 /** Rohe Track-Liste aus einem Spotify-Search-Query holen. */
 async function searchRaw(q, limit = 20) {
   try {
-    const data = await api(`/search?type=track&limit=${limit}&market=${CONFIG.MARKET}&q=${encodeURIComponent(q)}`);
+    const offset = Math.floor(Math.random() * 40);
+    const data = await api(`/search?type=track&limit=${limit}&offset=${offset}&market=${CONFIG.MARKET}&q=${encodeURIComponent(q)}`);
     return data.tracks?.items || [];
   } catch { return []; }
 }
@@ -355,7 +356,7 @@ async function ensurePlaylist(userId) {
     body:   JSON.stringify({
       name:        "Crate · Playlist-Tinder Funde",
       description: "Rechts gewischt in Crate.",
-      public:      true,
+      public:      false,
     }),
   });
   PLAYLIST_ID = pl.id;
@@ -706,18 +707,18 @@ function handleErr(e, fatal = false) {
    Preview-Enrichment — Deezer-Proxy (Spotify liefert preview_url nicht mehr)
    -------------------------------------------------------------------------- */
 
-/** Preview-URL für einen einzelnen Track vom Backend holen. */
+/** Preview-URL direkt von der Deezer-API holen (kein Backend nötig). */
 async function fetchDeezerPreview(track) {
   try {
     const mainArtist = track.artist.split(",")[0].trim();
+    const q = `track:"${track.name}" artist:"${mainArtist}"`;
     const res = await fetch(
-      `${CONFIG.BACKEND_URL}/preview` +
-      `?title=${encodeURIComponent(track.name)}` +
-      `&artist=${encodeURIComponent(mainArtist)}`,
-      { signal: AbortSignal.timeout(5000) }
+      `https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=1`,
+      { signal: AbortSignal.timeout(6000) }
     );
     if (!res.ok) return null;
-    return (await res.json()).preview_url || null;
+    const data = await res.json();
+    return data.data?.[0]?.preview || null;
   } catch { return null; }
 }
 
